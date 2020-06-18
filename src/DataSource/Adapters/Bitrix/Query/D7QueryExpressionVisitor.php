@@ -21,7 +21,7 @@ class D7QueryExpressionVisitor extends AbstractExpressionVisitor
             $filter->logic(ConditionTree::LOGIC_AND);
 
             foreach ($expression->getConjuncts() as $conjunct) {
-                $filter->where($this->dispatch($conjunct));
+                $this->dispatch($conjunct)($filter);
             }
 
             return $filter;
@@ -36,8 +36,8 @@ class D7QueryExpressionVisitor extends AbstractExpressionVisitor
         return function (ConditionTree $filter) use ($expression) {
             $filter->logic(ConditionTree::LOGIC_OR);
 
-            foreach ($expression->getDisjuncts() as $conjunct) {
-                $filter->where($this->dispatch($conjunct));
+            foreach ($expression->getDisjuncts() as $disjuncts) {
+                $this->dispatch($disjuncts)($filter);
             }
 
             return $filter;
