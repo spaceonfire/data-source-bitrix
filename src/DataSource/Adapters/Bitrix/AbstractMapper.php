@@ -27,7 +27,13 @@ abstract class AbstractMapper implements MapperInterface
      * @param array<string,mixed> $data
      * @return string
      */
-    abstract protected function resolveClass(array $data): string;
+    abstract public function resolveClass(array $data): string;
+
+    /**
+     * Returns array of keys which will be used to index entity by them
+     * @return string[]
+     */
+    abstract public function getUniqueIndexes(): array;
 
     /**
      * @inheritDoc

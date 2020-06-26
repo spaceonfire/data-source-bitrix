@@ -15,6 +15,8 @@ use spaceonfire\Collection\CollectionInterface;
 use spaceonfire\Collection\TypedCollection;
 use spaceonfire\Criteria\Adapter\SpiralPagination\PaginableCriteria;
 use spaceonfire\Criteria\CriteriaInterface;
+use spaceonfire\DataSource\Adapters\Bitrix\EntityManager;
+use spaceonfire\DataSource\Adapters\Bitrix\EntityManagerInterface;
 use spaceonfire\DataSource\Adapters\Bitrix\Heap\Heap;
 use spaceonfire\DataSource\EntityInterface;
 use spaceonfire\DataSource\MapperInterface;
@@ -31,23 +33,23 @@ final class D7Query implements QueryInterface
      */
     private $mapper;
     /**
-     * @var Heap
+     * @var EntityManagerInterface
      */
-    private $heap;
+    private $em;
 
     /**
      * D7Query constructor.
      * @param Query $query
      * @param MapperInterface $mapper
-     * @param Heap $heap
+     * @param EntityManagerInterface $em
      */
-    public function __construct(Query $query, MapperInterface $mapper, Heap $heap)
+    public function __construct(Query $query, MapperInterface $mapper, EntityManagerInterface $em)
     {
         $query->setSelect(['*']);
 
         $this->query = $query;
         $this->mapper = $mapper;
-        $this->heap = $heap;
+        $this->em = $em;
     }
 
     /**
@@ -76,7 +78,7 @@ final class D7Query implements QueryInterface
         try {
             $data = $this->query->fetch();
 
-            return is_array($data) ? $this->createEntity($data) : null;
+            return is_array($data) ? $this->em->make($this->mapper, $data) : null;
         } catch (SystemException $e) {
             throw new RuntimeException($e->getMessage(), $e->getCode(), $e);
         }
@@ -93,7 +95,7 @@ final class D7Query implements QueryInterface
             $entitiesCollection = new TypedCollection([], EntityInterface::class);
 
             foreach ($rawItems as $item) {
-                $entitiesCollection[] = $this->createEntity($item);
+                $entitiesCollection[] = $this->em->make($this->mapper, $item);
             }
 
             return $entitiesCollection;
@@ -162,18 +164,5 @@ final class D7Query implements QueryInterface
         } catch (SystemException $e) {
             throw new RuntimeException($e->getMessage(), $e->getCode(), $e);
         }
-    }
-
-    private function createEntity(array $data): EntityInterface
-    {
-        [$entity, $data] = $this->mapper->init($data);
-        $this->mapper->hydrate($entity, $data);
-
-        if ($entity instanceof EntityInterface) {
-            $this->heap->attach($entity, $data);
-            return $entity;
-        }
-
-        throw new RuntimeException('Associated with repository class must implement ' . EntityInterface::class);
     }
 }

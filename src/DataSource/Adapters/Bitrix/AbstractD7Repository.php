@@ -14,7 +14,6 @@ use spaceonfire\BitrixTools\ORMTools;
 use spaceonfire\Collection\CollectionInterface;
 use spaceonfire\Criteria\Criteria;
 use spaceonfire\Criteria\CriteriaInterface;
-use spaceonfire\DataSource\Adapters\Bitrix\Heap\Heap;
 use spaceonfire\DataSource\Adapters\Bitrix\Query\D7Query;
 use spaceonfire\DataSource\EntityInterface;
 use spaceonfire\DataSource\Exceptions\NotFoundException;
@@ -27,16 +26,40 @@ use spaceonfire\DataSource\RepositoryInterface;
 abstract class AbstractD7Repository implements RepositoryInterface
 {
     /**
-     * @var Heap
+     * @var EntityManagerInterface
      */
-    private static $heap;
+    private $em;
+    /**
+     * @var bool
+     */
+    private $tryFindOneByCriteriaInEntityManagerFirst = false;
 
-    private static function getHeap(): Heap
+    /**
+     * AbstractD7Repository constructor.
+     * @param EntityManagerInterface $em
+     */
+    public function __construct(EntityManagerInterface $em)
     {
-        if (self::$heap === null) {
-            self::$heap = new Heap();
-        }
-        return self::$heap;
+        $em->registerRepository($this, $this->getRole());
+        $this->em = $em;
+    }
+
+    /**
+     * Returns entity role
+     * @return string|null
+     */
+    public function getRole(): ?string
+    {
+        return null;
+    }
+
+    /**
+     * Enable option to try find entity in manager by criteria before making actual request to database in `findOne()`
+     * @param bool $value
+     */
+    final protected function tryFindOneByCriteriaInEntityManagerFirst(bool $value = true): void
+    {
+        $this->tryFindOneByCriteriaInEntityManagerFirst = $value;
     }
 
     /**
@@ -47,7 +70,7 @@ abstract class AbstractD7Repository implements RepositoryInterface
     /**
      * @return Entity
      */
-    protected function getEntity(): Entity
+    final protected function getD7Entity(): Entity
     {
         try {
             return $this->getDataManager()::getEntity();
@@ -67,7 +90,7 @@ abstract class AbstractD7Repository implements RepositoryInterface
     final protected function query(): QueryInterface
     {
         try {
-            return new D7Query($this->getDataManager()::query(), $this->getMapper(), self::getHeap());
+            return new D7Query($this->getDataManager()::query(), $this->getMapper(), $this->em);
         } catch (SystemException $e) {
             throw new RuntimeException($e->getMessage(), $e->getCode(), $e);
         }
@@ -78,10 +101,12 @@ abstract class AbstractD7Repository implements RepositoryInterface
      */
     public function save($entity): void
     {
-        $oldData = self::getHeap()->get($entity);
+        $oldData = $this->em->getEntityData($entity);
         $data = $this->getMapper()->extract($entity);
 
-        $primary = $oldData !== null ? ORMTools::extractPrimary($this->getEntity(), $oldData) : null;
+        $primary = $oldData !== null ? ORMTools::extractPrimary($this->getD7Entity(), $oldData) : null;
+
+        // TODO: detect changes between $oldData and $data update only by diff
 
         ORMTools::wrapTransaction(function () use ($primary, &$data): void {
             $result = $primary
@@ -96,7 +121,7 @@ abstract class AbstractD7Repository implements RepositoryInterface
         });
 
         $data = array_merge($oldData ?? [], $data);
-        self::getHeap()->attach($entity, $data);
+        $this->em->attachEntity($entity, $data);
         $this->getMapper()->hydrate($entity, $data);
     }
 
@@ -105,12 +130,12 @@ abstract class AbstractD7Repository implements RepositoryInterface
      */
     public function remove($entity): void
     {
-        $oldData = self::getHeap()->get($entity);
+        $oldData = $this->em->getEntityData($entity);
         if ($oldData === null) {
             return;
         }
 
-        $primary = ORMTools::extractPrimary($this->getEntity(), $oldData);
+        $primary = ORMTools::extractPrimary($this->getD7Entity(), $oldData);
 
         ORMTools::wrapTransaction(function () use ($primary): void {
             $result = $this->getDataManager()::delete($primary);
@@ -120,7 +145,7 @@ abstract class AbstractD7Repository implements RepositoryInterface
             }
         });
 
-        self::getHeap()->detach($entity);
+        $this->em->detachEntity($entity);
     }
 
     /**
@@ -128,7 +153,7 @@ abstract class AbstractD7Repository implements RepositoryInterface
      */
     public function findByPrimary($primary)
     {
-        $primaryKeys = array_values($this->getEntity()->getPrimaryArray());
+        $primaryKeys = array_values($this->getD7Entity()->getPrimaryArray());
 
         $primary = is_array($primary) ? $primary : [$primary];
 
@@ -138,9 +163,11 @@ abstract class AbstractD7Repository implements RepositoryInterface
 
         $criteria = new Criteria();
         $expr = Criteria::expr();
+        $mapper = $this->getMapper();
+        $indexData = [];
 
         foreach ($primaryKeys as $i => $key) {
-            $domainKey = $this->getMapper()->convertNameToDomain($key);
+            $domainKey = $mapper->convertNameToDomain($key);
 
             foreach ([$domainKey, $key, $i] as $k) {
                 if (isset($primary[$k])) {
@@ -153,7 +180,12 @@ abstract class AbstractD7Repository implements RepositoryInterface
                 throw new InvalidArgumentException('Invalid primary');
             }
 
-            $criteria->andWhere($expr->property($key, $expr->same($val)));
+            $criteria->andWhere($expr->property($domainKey, $expr->same($val)));
+            $indexData[$key] = $mapper->convertValueToStorage($domainKey, $val);
+        }
+
+        if (null !== $entity = $this->em->getByIndex($this, $indexData)) {
+            return $entity;
         }
 
         $entity = $this->findOne($criteria);
@@ -184,6 +216,14 @@ abstract class AbstractD7Repository implements RepositoryInterface
      */
     public function findOne(?CriteriaInterface $criteria = null)
     {
+        if (
+            $this->tryFindOneByCriteriaInEntityManagerFirst &&
+            $criteria !== null &&
+            null !== $entity = $this->em->getByCriteria($this, $criteria)
+        ) {
+            return $entity;
+        }
+
         $query = $this->query();
 
         if ($criteria !== null) {
