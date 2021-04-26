@@ -104,23 +104,25 @@ abstract class AbstractD7Repository implements RepositoryInterface
         $oldData = $this->em->getEntityData($entity);
         $data = $this->getMapper()->extract($entity);
 
-        $primary = $oldData !== null ? ORMTools::extractPrimary($this->getD7Entity(), $oldData) : null;
+        [$primary, $changes] = $this->splitPrimaryAndChanges($data, $oldData);
 
-        // TODO: detect changes between $oldData and $data update only by diff
+        if ([] === $changes) {
+            return;
+        }
 
-        ORMTools::wrapTransaction(function () use ($primary, &$data): void {
+        $primary = ORMTools::wrapTransaction(function () use ($primary, $changes): array {
             $result = $primary
-                ? $this->getDataManager()::update($primary, $data)
-                : $this->getDataManager()::add($data);
+                ? $this->getDataManager()::update($primary, $changes)
+                : $this->getDataManager()::add($changes);
 
             if (!$result->isSuccess()) {
                 throw static::makeSaveException($result);
             }
 
-            $data = array_merge($data, $result->getPrimary());
+            return $result->getPrimary();
         });
 
-        $data = array_merge($oldData ?? [], $data);
+        $data = array_merge($oldData ?? [], $data, $primary);
         $this->em->attachEntity($entity, $data);
         $this->getMapper()->hydrate($entity, $data);
     }
@@ -299,5 +301,35 @@ abstract class AbstractD7Repository implements RepositoryInterface
     {
         $e = new RuntimeException(implode('; ', $result->getErrorMessages()));
         return new SaveException(null, [], 0, $e);
+    }
+
+    private function splitPrimaryAndChanges(array $data, ?array $oldData): array
+    {
+        $primary = [];
+        foreach ($this->getD7Entity()->getPrimaryArray() as $field) {
+            if (null !== $oldData) {
+                $primary[$field] = $oldData[$field];
+            }
+
+            unset($data[$field]);
+        }
+        $primary = [] === $primary ? null : $primary;
+
+        if (null === $oldData) {
+            return [$primary, $data];
+        }
+
+        $changes = [];
+        foreach ($data as $offset => $value) {
+            $oldValue = $oldData[$offset] ?? null;
+
+            if ($oldValue === $value) {
+                continue;
+            }
+
+            $changes[$offset] = $value;
+        }
+
+        return [$primary, $changes];
     }
 }

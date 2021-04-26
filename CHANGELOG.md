@@ -22,5 +22,12 @@ Updates should follow the [Keep a CHANGELOG](http://keepachangelog.com/) princip
 - Nothing
 -->
 
+## [2.5.0] - 2021-04-26
+
+- Sync with new `spaceonfire/data-source` release cycle.
+- Fix overriding primary key.
+- Update by changes.
+
 ## [1.0.0] - 2020-06-29
+
 First release
