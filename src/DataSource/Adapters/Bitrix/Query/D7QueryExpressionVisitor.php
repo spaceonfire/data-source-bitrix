@@ -18,11 +18,14 @@ class D7QueryExpressionVisitor extends AbstractExpressionVisitor
     public function visitConjunction(Logic\AndX $expression): callable
     {
         return function (ConditionTree $filter) use ($expression) {
-            $filter->logic(ConditionTree::LOGIC_AND);
+            $subFilter = new ConditionTree();
+            $subFilter->logic(ConditionTree::LOGIC_AND);
 
             foreach ($expression->getConjuncts() as $conjunct) {
-                $this->dispatch($conjunct)($filter);
+                $this->dispatch($conjunct)($subFilter);
             }
+
+            $filter->addCondition($subFilter);
 
             return $filter;
         };
@@ -34,11 +37,14 @@ class D7QueryExpressionVisitor extends AbstractExpressionVisitor
     public function visitDisjunction(Logic\OrX $expression): callable
     {
         return function (ConditionTree $filter) use ($expression) {
-            $filter->logic(ConditionTree::LOGIC_OR);
+            $subFilter = new ConditionTree();
+            $subFilter->logic(ConditionTree::LOGIC_OR);
 
             foreach ($expression->getDisjuncts() as $disjuncts) {
-                $this->dispatch($disjuncts)($filter);
+                $this->dispatch($disjuncts)($subFilter);
             }
+
+            $filter->addCondition($subFilter);
 
             return $filter;
         };
